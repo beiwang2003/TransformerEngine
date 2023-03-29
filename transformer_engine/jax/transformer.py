@@ -21,6 +21,8 @@ from .module import LayerNorm, Softmax
 from .softmax import SoftmaxType
 from .sharding import infer_major_sharding_type, infer_sharding_type
 from .sharding import global_shard_resource, ShardingType
+from .cuda_bind import cuda_profile_start, cuda_profile_stop
+from .cuda_bind import cuda_nvtx_range_push, cuda_nvtx_range_pop
 
 PRNGKey = Any
 Shape = Tuple[int, ...]
@@ -861,6 +863,7 @@ class TransformerLayer(nn.Module):
             self_attn_type = AttentionType.CAUSAL
         assert self_attn_type is not None
 
+        cuda_nvtx_range_push(f"Encoder::MHA")
         # [batch, length, emb_dim] -> [batch, length, emb_dim]
         x, residual = MultiHeadAttention(
             num_heads=self.num_attention_heads,
@@ -887,7 +890,8 @@ class TransformerLayer(nn.Module):
                            attn_bias,
                            deterministic=deterministic,
                            decode=decode)
-
+        cuda_nvtx_range_pop()
+        
         def hidden_dropout(x, deterministic):
             assert isinstance(self.hidden_dropout_dims, Sequence)
             x_shape_len = len(x.shape)
@@ -905,6 +909,7 @@ class TransformerLayer(nn.Module):
                            broadcast_dims=drop_path_shape)(x, deterministic=deterministic)
         x = x + residual
 
+        cuda_nvtx_range_push(f"Decoder::MHA")
         mlp_input = x
         if self.layer_type == TransformerLayerType.DECODER:
             assert encoded is not None, \
@@ -936,7 +941,9 @@ class TransformerLayer(nn.Module):
                                                   deterministic=deterministic)
             y = hidden_dropout(y, deterministic)
             mlp_input = y + residual
+        cuda_nvtx_range_pop()
 
+        cuda_nvtx_range_push(f"MLP")
         # MlpBlock
         residual = mlp_input
         z, ln_out = LayerNormMLP(
@@ -958,7 +965,8 @@ class TransformerLayer(nn.Module):
             bias_init=self.bias_init,
             name='mlp',
         )(mlp_input, deterministic=deterministic)
-
+        cuda_nvtx_range_pop()
+        
         if self.apply_residual_connection_post_layernorm:
             assert ln_out is not None
             residual = ln_out

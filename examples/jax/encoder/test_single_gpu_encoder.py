@@ -19,6 +19,7 @@ from flax.core.frozen_dict import FrozenDict
 from flax.training import train_state
 
 import transformer_engine.jax as te
+import nvtx
 
 PARAMS_KEY = 'params'
 DROPOUT_KEY = 'dropout'
@@ -90,7 +91,7 @@ def train_step(state, inputs, masks, labels, var_collect, rngs, use_fp8):
 
     return state, loss, accuracy, var_collect
 
-
+@nvtx.annotation("train_epoch", color="red")
 def train_epoch(state, train_ds, batch_size, rngs, var_collect, use_fp8):
     """Train for a single epoch."""
     train_ds_size = len(train_ds['sentence'])
@@ -130,7 +131,7 @@ def eval_step(state, inputs, masks, labels, var_collect):
     accuracy = jnp.mean(jnp.argmax(logits, -1) == labels)
     return loss, accuracy
 
-
+@nvtx.annotation("eval_model", color="blue")
 def eval_model(state, test_ds, batch_size, var_collect):
     """Evaluation loop."""
     test_ds_size = len(test_ds['sentence'])
@@ -252,10 +253,12 @@ def train_and_evaluate(args):
             rng, dropout_rng = jax.random.split(rng)
             rngs = {INPUT_KEY: input_rng, DROPOUT_KEY: dropout_rng}
 
-            state, train_loss, train_accuracy, var_collect = train_epoch(
-                state, train_ds, args.batch_size, rngs, var_collect, args.use_fp8)
+            with nvtx.annotate("train_epoch_loop", color="orange"):
+                state, train_loss, train_accuracy, var_collect = train_epoch(
+                    state, train_ds, args.batch_size, rngs, var_collect, args.use_fp8)
 
-            test_loss, test_accuracy = eval_model(state, test_ds, args.test_batch_size, var_collect)
+            with nvtx.annotate("eval_model_loop", color="yellow"):
+                test_loss, test_accuracy = eval_model(state, test_ds, args.test_batch_size, var_collect)
 
             print(f"Epoch: {epoch:>2} "
                   f"Train Loss: {train_loss:.6f} "
