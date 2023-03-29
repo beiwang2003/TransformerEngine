@@ -91,7 +91,7 @@ def train_step(state, inputs, masks, labels, var_collect, rngs, use_fp8):
 
     return state, loss, accuracy, var_collect
 
-@nvtx.annotation("train_epoch", color="red")
+@nvtx.annotate("train_epoch", color="red")
 def train_epoch(state, train_ds, batch_size, rngs, var_collect, use_fp8):
     """Train for a single epoch."""
     train_ds_size = len(train_ds['sentence'])
@@ -131,7 +131,7 @@ def eval_step(state, inputs, masks, labels, var_collect):
     accuracy = jnp.mean(jnp.argmax(logits, -1) == labels)
     return loss, accuracy
 
-@nvtx.annotation("eval_model", color="blue")
+@nvtx.annotate("eval_model", color="blue")
 def eval_model(state, test_ds, batch_size, var_collect):
     """Evaluation loop."""
     test_ds_size = len(test_ds['sentence'])
