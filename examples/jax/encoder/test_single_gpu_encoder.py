@@ -80,14 +80,16 @@ def train_step(state, inputs, masks, labels, var_collect, rngs, use_fp8):
         return loss, logits
 
     var_collect = FrozenDict({**var_collect, PARAMS_KEY: state.params})
-    grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
-    (loss, logits), grads = grad_fn(var_collect)
-    accuracy = jnp.mean(jnp.argmax(logits, -1) == labels)
+    with nvtx.annotate("grad"):
+        grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
+        (loss, logits), grads = grad_fn(var_collect)
+        accuracy = jnp.mean(jnp.argmax(logits, -1) == labels)
 
     var_collect, grads = grads.pop(PARAMS_KEY)
-    state = state.apply_gradients(grads=grads)
-    if use_fp8:
-        var_collect = te.update_fp8_metas(var_collect)
+    with nvtx.annotate("update state"):
+        state = state.apply_gradients(grads=grads)
+        if use_fp8:
+            var_collect = te.update_fp8_metas(var_collect)
 
     return state, loss, accuracy, var_collect
 
@@ -233,20 +235,22 @@ def train_and_evaluate(args):
         masks = jnp.zeros(mask_shape, dtype=jnp.uint8)
         var_collect = encoder.init(init_rngs, inputs, masks)
         tx = optax.adamw(args.lr)
-        state = train_state.TrainState.create(apply_fn=encoder.apply,
-                                              params=var_collect[PARAMS_KEY],
-                                              tx=tx)
+        with nvtx.annotate("create state"):
+            state = train_state.TrainState.create(apply_fn=encoder.apply,
+                                                  params=var_collect[PARAMS_KEY],
+                                                  tx=tx)
 
         if args.use_fp8:
             labels = jnp.zeros(label_shape, dtype=jnp.bfloat16)
             check_fp8(state, var_collect, inputs, masks, labels)
 
-        if args.dry_run:
-            labels = jnp.zeros(label_shape, dtype=jnp.bfloat16)
-            rngs = {DROPOUT_KEY: dropout_rng}
-            train_step(state, inputs, masks, labels, var_collect, rngs, args.use_fp8)
-            print("PASSED")
-            return None
+        with nvtx.annotate("dry_run", color="pink"):
+            if args.dry_run:
+                labels = jnp.zeros(label_shape, dtype=jnp.bfloat16)
+                rngs = {DROPOUT_KEY: dropout_rng}
+                train_step(state, inputs, masks, labels, var_collect, rngs, args.use_fp8)
+                print("PASSED")
+                return None
 
         for epoch in range(1, args.epochs + 1):
             rng, input_rng = jax.random.split(rng)
