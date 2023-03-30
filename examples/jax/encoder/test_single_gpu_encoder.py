@@ -68,7 +68,7 @@ class Net(nn.Module):
         x = nn.Dense(features=2, dtype=jnp.bfloat16)(x)
         return x
 
-
+@nvtx.annotate("train_step", color="black")
 @partial(jax.jit, static_argnums=6)
 def train_step(state, inputs, masks, labels, var_collect, rngs, use_fp8):
     """Computes gradients, loss and accuracy for a single batch."""
